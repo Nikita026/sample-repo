@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Nested Stack
+
+Parameters:
+  #################################################################
+  ##################Global Parameters #############################
+  #################################################################
+
+  Environment:
+    Type: String
+    Description: Which environmnet to deploy in
+
+  BucketPath:
+    Type: String
+    Description:  Bucket Name having Stacks
+
+  #################################################################
+  ##################Cognito Parameters ############################
+  #################################################################
+
+  ############### IdentityPool Parameters #########################
+  AllowUnauthenticatedIdentities:
+    Type: String
+    Default: false
+    Description: Want to allow Unauthenticated Identites Yes / No
+    AllowedValues:
+      - true
+      - false
+
+
+  ############### UserPool Parameters #########################
+  AutoVerifiedAttributes:
+    Type: String
+    Default: "email"
+    Description: Which procedure to use for verification
+  MfaConfiguration:
+    Type: String
+    Default: "OFF"
+    Description: MFA Configuration 
+    AllowedValues:
+      - "OFF"
+
+  ############### UserPoolClient Parameters #####################
+
+  AppClientName:
+    Type: String
+    Description: The app Client Name
+  GenerateSecret:
+    Type: String
+    Default: True
+    Description: You want to Generate Secret For UserPoolClient
+    AllowedValues:
+      - True
+      - False
+  DomainName:
+    Type: String
+    Description: Domain name for cognito user pool Domain
+  CertificateArn:
+    Type: String
+    Description: Certificate ARN for cognito domain
+
+#################################################################
+########################### Api Gateway #########################
+#################################################################
+
+
+#################################################################
+########################### Conditions ##########################
+#################################################################
+
+
+#################################################################
+########################### Resources ###########################
+#################################################################
+
+Resources:
+  APICognito:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${BucketPath}/Cognito.yaml
+      Parameters:
+        IdentityPoolName: !Sub ${Environment}-IdentityPool
+      
+        APIGatewayName: !Sub ${Environment}-APIGateway
+        AllowUnauthenticatedIdentities: !Ref AllowUnauthenticatedIdentities
+        UserPoolName: !Sub ${Environment}-UserPool
+        AutoVerifiedAttributes: !Ref AutoVerifiedAttributes
+        MfaConfiguration: !Ref MfaConfiguration
+        DeveloperProviderName: !Sub ${Environment}-DeveloperProvider
+        UnauthRoleName: !Sub ${Environment}-UnauthRole
+        AuthRoleName: !Sub ${Environment}-AuthRole
+        AppClientName: !Ref AppClientName
+        GenerateSecret: !Ref GenerateSecret
+        Environment: !Ref Environment
+        LambdaOneName: !GetAtt Lambda.Outputs.LambdaOneName
+        LambdaTwoName: !GetAtt Lambda.Outputs.LambdaTwoName
+        LambdaOneArn: !GetAtt Lambda.Outputs.LambdaOneArn
+        LambdaTwoArn: !GetAtt Lambda.Outputs.LambdaTwoArn
+        DomainName: !Ref DomainName
+        CertificateArn: !Ref CertificateArn
+
+
+  Lambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${BucketPath}/Lambda.yaml
+      Parameters:
+        Environment: !Ref Environment
+        

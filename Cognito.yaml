@@ -1,0 +1,472 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS Cognito Stack with User Pool, Identity Pool, IAM roles (authenticated / unauthenticated), Trust Policies and an app client.
+
+#################################################################
+########################### Parameters ##########################
+#################################################################
+
+Parameters:
+
+  APIGatewayName:
+    Type: String
+    Description: Name of the API
+  LambdaOneName:
+    Type: String
+  LambdaTwoName:
+    Type: String
+  LambdaOneArn:
+    Type: String
+  LambdaTwoArn:
+    Type: String
+
+  IdentityPoolName:
+    Type: String
+    Description: Name of the identity pool
+  AllowUnauthenticatedIdentities:
+    Type: String
+    AllowedValues:
+      - true
+      - false
+  UserPoolName:
+    Type: String
+    Description: Name of the user pool
+  AutoVerifiedAttributes:
+    Type: String
+    Description: AutoVerifiedAttributes Like em
+    Default: email
+  MfaConfiguration:
+    Type: String
+    Default: "OFF"
+  DeveloperProviderName:
+    Type: String
+    Description: Name of the developer provider
+  UnauthRoleName:
+    Type: String
+    Description: Unauth role name
+  AuthRoleName:
+    Type: String
+    Description: Auth role name
+  AppClientName:
+    Type: String
+    Description: The app Client Name
+  GenerateSecret:
+    Type: String
+    AllowedValues:
+      - true
+      - false
+  Environment:
+    Type: String
+
+############### UserPool Lambda Trigger Parameters ########## 
+  
+  PostConfirmation:
+    Type: String
+    Description: Lambda ARN for PostConfirmation
+    Default: ""
+  PreSignUp:
+    Type: String
+    Description: Lambda ARN for PreSignUp
+    Default: ""
+  PreAuthentication:
+    Type: String
+    Description: Lambda ARN for PreAuthentication
+    Default: ""
+  PostAuthentication:
+    Type: String
+    Description: Lambda ARN for PostAuthentication
+    Default: ""
+  CustomSMSSender:
+    Type: String
+    Description: Lambda ARN for CustomSMSSender
+    Default: ""
+  CustomMessage:
+    Type: String
+    Description: Lambda ARN for CustomMessage
+    Default: ""
+  CustomEmailSender:
+    Type: String
+    Description: Lambda ARN for CustomEmailSender
+    Default: ""
+  CreateAuthChallenge:
+    Type: String
+    Description: Lambda ARN for CreateAuthChallenge
+    Default: ""
+  DomainName:
+    Type: String
+    Default: ""
+  CertificateArn:
+    Type: String
+    Default: ""
+
+
+#################################################################
+########################### Conditions ###########################
+#################################################################
+
+Conditions:
+  PostConfirmation: !Not [!Equals [!Ref PostConfirmation, '']]
+  PreSignUp: !Not [!Equals [!Ref PreSignUp, '']]
+  PreAuthentication: !Not [!Equals [!Ref PreAuthentication, '']]
+  PostAuthentication: !Not [!Equals [!Ref PostAuthentication, '']]
+  CustomSMSSender: !Not [!Equals [!Ref CustomSMSSender, '']]
+  CustomMessage: !Not [!Equals [!Ref CustomMessage, '']]
+  CustomEmailSender: !Not [!Equals [!Ref CustomEmailSender, '']]
+  CreateAuthChallenge: !Not [!Equals [!Ref CreateAuthChallenge, '']]
+  HasDomain: !Not [!Equals [!Ref DomainName, '']]
+  HasCertificateArn: !Not [!Equals [!Ref CertificateArn, '']]
+
+
+#################################################################
+########################### Resources ###########################
+#################################################################
+
+Resources:
+  IdentityPool:
+    Type: "AWS::Cognito::IdentityPool"
+    Properties:
+      IdentityPoolName: !Ref IdentityPoolName
+      AllowUnauthenticatedIdentities: !Ref AllowUnauthenticatedIdentities
+      DeveloperProviderName: !Ref DeveloperProviderName
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName:
+            !Join [
+              "",
+              ["cognito-idp.",!Ref "AWS::Region", ".amazonaws.com/", !Ref UserPool],
+            ]
+
+  UserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      AutoVerifiedAttributes:
+        - !Ref AutoVerifiedAttributes
+      MfaConfiguration: !Ref MfaConfiguration
+      UsernameConfiguration:
+         CaseSensitive: False
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+          - Name: verified_phone_number
+            Priority: 2
+      # UsernameAttributes: ["email"]
+      Policies:
+        PasswordPolicy:
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: true
+          MinimumLength: 8
+          RequireSymbols: true
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+          AttributeDataType: String
+      UserPoolName: !Ref UserPoolName
+      LambdaConfig:
+        PostConfirmation: !If [PostConfirmation, !Ref PostConfirmation , !Ref 'AWS::NoValue']
+        PreSignUp: !If [PreSignUp, !Ref PreSignUp , !Ref 'AWS::NoValue']
+        PreAuthentication: !If [PreAuthentication, !Ref PreAuthentication , !Ref 'AWS::NoValue']
+        PostAuthentication: !If [PostAuthentication, !Ref PostAuthentication , !Ref 'AWS::NoValue']
+        CustomSMSSender:  !If [CustomSMSSender, { LambdaArn: !Ref CustomSMSSender } , !Ref 'AWS::NoValue']
+        CustomMessage: !If [CustomMessage, !Ref CustomMessage , !Ref 'AWS::NoValue']
+        CustomEmailSender: !If [CustomEmailSender, { LambdaArn: !Ref CustomEmailSender } , !Ref 'AWS::NoValue']
+        CreateAuthChallenge: !If [CreateAuthChallenge, !Ref CreateAuthChallenge , !Ref 'AWS::NoValue']
+
+  UnauthRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Federated: "cognito-identity.amazonaws.com"
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: "unauthenticated"
+
+      RoleName: !Ref UnauthRoleName
+
+  UnauthRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Action: ["mobileanalytics:PutEvents", "cognito-sync:*"]
+            Resource: "*"
+      PolicyName: CognitoPolicy
+      Roles:
+        - !Ref UnauthRole
+
+  AuthRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Federated: "cognito-identity.amazonaws.com"
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: "authenticated"
+
+      RoleName: !Ref AuthRoleName
+
+  AuthRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Action:
+              [
+                "mobileanalytics:PutEvents",
+                "cognito-sync:*",
+                "cognito-identity:*",
+              ]
+            Resource: "*"
+      PolicyName: CognitoPolicy
+      Roles:
+        - !Ref AuthRole
+
+  UserPoolClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    DependsOn:
+      - UserPoolResourceServer
+    Properties:
+      ClientName: !Ref AppClientName
+      GenerateSecret: !Ref GenerateSecret
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: 
+        - "client_credentials"
+      AllowedOAuthScopes:
+        - !Sub https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/accela.interface
+        # - {"Fn::Join": ["", ["https://",{"Ref": "APIGateway"},".execute-api.","amazonaws.com/",{"Ref": "Environment"},"/accela.interface"]]}
+      UserPoolId: !Ref UserPool
+      SupportedIdentityProviders: ["COGNITO"]
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows: ["ALLOW_CUSTOM_AUTH","ALLOW_USER_SRP_AUTH","ALLOW_REFRESH_TOKEN_AUTH"]
+      
+  IdentityPoolRoleMapping:
+    Type: "AWS::Cognito::IdentityPoolRoleAttachment"
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt AuthRole.Arn
+        unauthenticated: !GetAtt UnauthRole.Arn
+
+  UserPoolDomain: 
+    Type: AWS::Cognito::UserPoolDomain 
+    Condition:  HasDomain
+    Properties:
+      UserPoolId: !Ref UserPool 
+      Domain: !Ref DomainName
+      CustomDomainConfig:  !If [HasCertificateArn,{CertificateArn: !Ref CertificateArn}, !Ref 'AWS::NoValue']
+
+
+  ApiGwAccountConfig:
+    Type: "AWS::ApiGateway::Account"
+    Properties:
+      CloudWatchRoleArn: !GetAtt "ApiGatewayLoggingRole.Arn"
+  ApiGatewayLoggingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "apigateway.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - !Sub "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents"
+                Resource: '*'
+
+  UserPoolResourceServer: 
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties: 
+      UserPoolId: !Ref UserPool
+      Identifier: !Sub https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com
+      Name: "Name" 
+      Scopes: 
+      - ScopeName: "accela.interface" 
+        ScopeDescription: "Gets all files, gets a single file and puts a single file" 
+
+
+  Authorizer:
+    Type: 'AWS::ApiGateway::Authorizer'
+    Properties:
+      AuthorizerResultTtlInSeconds: '300'
+      ProviderARNs: [!GetAtt  UserPool.Arn]
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      Name: !Sub ${Environment}-default-authorizer
+      RestApiId: !Ref  APIGateway
+
+
+  APIGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Description: "API Gateway"
+      Name: !Ref APIGatewayName
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+      EndpointConfiguration: 
+        Types:
+          - REGIONAL
+
+  InputResource:
+    Type: 'AWS::ApiGateway::Resource'
+    DependsOn:
+      - APIGateway
+    Properties:
+      RestApiId: !Ref APIGateway
+      ParentId: !GetAtt 
+        - APIGateway
+        - RootResourceId
+      PathPart: "{folder}"
+
+  ArchiveResource:
+    Type: 'AWS::ApiGateway::Resource'
+    DependsOn:
+      - Method
+    Properties:
+      RestApiId: !Ref APIGateway
+      ParentId: !GetAtt 
+        - InputResource
+        - ResourceId
+      PathPart: "{proxy+}"
+
+  Method:
+    Type: 'AWS::ApiGateway::Method'
+    DependsOn:
+      - InputResource
+    Properties:
+      RestApiId: !Ref APIGateway
+      ResourceId: !Ref InputResource
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizationScopes: 
+        - !Sub https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/accela.interface
+      AuthorizerId: !Ref Authorizer
+      MethodResponses: 
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+      HttpMethod: GET
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaOneArn}/invocations
+
+  ProxyMethod:
+    Type: 'AWS::ApiGateway::Method'
+    DependsOn:
+      - ArchiveResource
+    Properties:
+      RestApiId: !Ref APIGateway
+      ResourceId: !Ref ArchiveResource
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizationScopes: 
+        - !Sub https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/accela.interface
+      AuthorizerId: !Ref Authorizer
+      HttpMethod: ANY
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTwoArn}/invocations
+
+
+
+  Deployment:
+    DependsOn:
+      - ProxyMethod
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref APIGateway
+      Description: latest
+      StageName: !Ref Environment
+      StageDescription:
+        MetricsEnabled: true
+        LoggingLevel: 'INFO'
+        CanarySetting: 
+          PercentTraffic: '0'
+        CachingEnabled: true
+        ThrottlingBurstLimit: '20'
+        ThrottlingRateLimit: '100'
+
+  Lambda1InvokePermission:
+     Type: AWS::Lambda::Permission
+     Properties:
+       FunctionName: !Ref LambdaOneName
+       Action: "lambda:invokeFunction"
+       Principal: "apigateway.amazonaws.com"
+       SourceArn: {"Fn::Join": ["", ["arn:aws:execute-api:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":", {"Ref": "APIGateway"}, "/*"]]}
+
+  Lambda2InvokePermission:
+     Type: AWS::Lambda::Permission
+     Properties:
+       FunctionName: !Ref LambdaTwoName
+       Action: "lambda:invokeFunction"
+       Principal: "apigateway.amazonaws.com"
+       SourceArn: {"Fn::Join": ["", ["arn:aws:execute-api:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":", {"Ref": "APIGateway"}, "/*"]]}
+
+  usagePlan:
+    Type: 'AWS::ApiGateway::UsagePlan'
+    DependsOn:
+      - Lambda2InvokePermission
+    Properties:
+      Description: !Sub ${Environment}-Usage-Plan
+      Quota:
+        Limit: 100
+        Period: MONTH
+      Throttle:
+        BurstLimit: 1
+        RateLimit: 1
+      UsagePlanName: !Sub ${Environment}-Basic
+
+  ApiKey:
+    Type: 'AWS::ApiGateway::ApiKey'
+    DependsOn:
+      - usagePlan
+      - Deployment
+    Properties:
+      Name: !Sub ${Environment}-EApp
+      Description: CloudFormation API Key V1
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref APIGateway
+          StageName: !Ref Environment
+
+  usagePlanKey:
+    Type: 'AWS::ApiGateway::UsagePlanKey'
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref usagePlan
+
+
+

@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Template for lambdaFunction
+
+
+#################################################################
+########################### Parameters ##########################
+#################################################################
+
+Parameters:
+  Environment:
+    Type: String
+  
+
+#################################################################
+########################### Resources ###########################
+#################################################################
+
+Resources:
+
+  LambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub ${Environment}-LambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Policies:
+        - PolicyName: !Sub ${Environment}-S3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                  - "s3:DeleteObject"
+                Resource: "*"
+
+  Lambda1:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - LambdaRole
+    Properties:
+      FunctionName: !Sub ${Environment}-LambdaFunctionTestingNormal
+      Description: "Lambda Function"
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs16.x
+      Timeout: 300
+      Code:
+        ZipFile:  |
+          const AWS = require("aws-sdk");
+          const s3 = new AWS.S3();
+          exports.handler = async (event) => {
+            try {
+              const data = await s3
+                .listObjects({
+                  Bucket: event.path.substring(event.path.lastIndexOf("/") + 1),
+                })
+                .promise();
+                const objects = data.Contents.map((obj) => {
+                  return {
+                    name: obj.Key,
+                  };
+              });
+              return {
+                statusCode: 200,
+                body: JSON.stringify(objects),
+                isBase64Encoded: false,
+              };
+            } catch (error) {
+              return {
+                statusCode: error.statusCode,
+                body: JSON.stringify(error),
+                isBase64Encoded: false,
+              };
+            }
+          };
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+
+  Lambda2:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - LambdaRole
+    Properties:
+      FunctionName: !Sub ${Environment}-LambdaFunctionTestingProxy
+      Description: "Lambda Function"
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs16.x
+      Timeout: 300
+      Code:
+        ZipFile: |
+          const AWS = require("aws-sdk");
+          const s3 = new AWS.S3();
+          const getBucketParamsFromPath = (path) => {
+              return new Promise((resolve, reject) => {
+              try {
+                  const index = path.indexOf("/", 1);
+                  const bucket = path.substring(1, index);
+                  const key = path.substring(path.indexOf("/", index)).substring(1);
+                  resolve({
+                      Bucket: bucket,
+                      Key: decodeURIComponent(key)
+                  });
+              } catch (error) {
+                  reject(error);
+              }
+              });
+          };
+
+          async function putFile(event) {
+          const bucketParams = await getBucketParamsFromPath(event.path);
+              try {
+                  await s3
+                      .upload({
+                          ...bucketParams,
+                          ContentEncoding: 'base64',
+                          Body: Buffer.from(event.body, 'base64'),
+                      })
+                      .promise();
+                  console.log('LOG', {
+                      ...bucketParams,
+                      Bucket: 'accela-input'
+                  })
+                  await s3.deleteObject({
+                      ...bucketParams,
+                      Bucket: 'accela-input'
+                      }).promise();
+                  return {
+                      statusCode: 200,
+                      body: JSON.stringify({ response: bucketParams.Key }),
+                      isBase64Encoded: false,
+                  };
+              } catch (error) {
+                  return {
+                      statusCode: 400,
+                      body: JSON.stringify(error),
+                      isBase64Encoded: false,
+                  };
+              }
+          }
+
+          async function getFile(event) {
+              const bucketParams = await getBucketParamsFromPath(event.path);
+              try {
+                  const file = await s3.getObject(bucketParams).promise();
+                  return {
+                      statusCode: 200,
+                      body: file.Body.toString(),
+                      headers: {
+                          ContentType: file.ContentType,
+                      },
+                      isBase64Encoded: false,
+                  };
+              } catch (error) {
+                  return {
+                      statusCode: error.statusCode,
+                      body: JSON.stringify(error),
+                      isBase64Encoded: false,
+                  };  
+              }
+          }
+          exports.handler = async (event) => {
+              switch (event.httpMethod) {
+                  case "GET":
+                      return await getFile(event);
+                  default:
+                      return await putFile(event);
+              }
+          };         
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+
+
+#################################################################
+########################### Outputs #############################
+#################################################################
+
+
+Outputs:
+  LambdaOneArn:
+    Value: !GetAtt Lambda1.Arn
+    Description: Lambda Function ARN
+  LambdaOneName:
+    Value: !Ref Lambda1
+    Description: Lambda Function Name
+
+  LambdaTwoArn:
+    Value: !GetAtt Lambda2.Arn
+    Description: Lambda Function ARN
+  LambdaTwoName:
+    Value: !Ref Lambda2
+    Description: Lambda Function Name

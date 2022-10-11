@@ -1,0 +1,17 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - echo Uploading CloudFormation template to S3 Bucket
+      - aws s3 sync . s3://"$BucketPath"/  --exclude "*" --include "*.yaml"
+  post_build:
+    commands:
+      - ls
+      - echo Deploying the CF
+      - chmod +x create-update-stack.sh
+      - ./create-update-stack.sh consumerprotectionarchitecture-deploy
+      - echo CF Deployment successful
+artifacts:
+  files:
+    - "**/*"
