@@ -261,8 +261,6 @@ Resources:
             Value: !Ref "AWS::Region"
           - Name: AWS_ACCOUNT_ID
             Value: !Ref "AWS::AccountId"
-          - Name: S3_BUCKET # this is the s3 bucket where is lambda code & layer 
-            Value: !Ref LambdaPlusLayerBucket # Ref commands refer to parameters
           - Name: Environment
             Value: !Ref Environment
           - Name: BucketPath
@@ -295,11 +293,11 @@ Resources:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Join ['-', ['gluejobspipelineartifacts', !Ref Stage]]
+      BucketName: !Join ['-', ['cpartifacts', !Ref Stage]]
 
   # Create S3 Buckets (Storing Lambda and Layer)
   CFTemplateBucket: 
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Join ['-', [!Ref BucketName, !Ref Stage]]
+      BucketName: !Sub ${AWS::StackName}-cft-${Stage}
