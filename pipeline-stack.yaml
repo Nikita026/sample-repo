@@ -165,9 +165,9 @@ Resources:
                 Action:
                   - "lambda:*"
                   - "iam:*"
-                  - "events:*"
-                  - "cloudwatch:*"
                   - "apigateway:*"
+                  - "cognito-idp:*"
+                  - "cognito-identity:*"
                 Resource: "*"
               - 
                 Effect: Allow
